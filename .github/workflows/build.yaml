@@ -1,0 +1,48 @@
+name: Maven Build
+on:
+  push:
+    tags:
+
+env:
+  MVN_VERSION: '3.6.3'
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    container: docker.io/centos:7
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Set Up Environment
+        run: |
+          curl -L https://pypi.python.org/packages/2.7/s/setuptools/setuptools-0.6c11-py2.7.egg#md5=fe1f997bc722265116870bc7919059ea -o setuptools-0.6c11-py2.7.egg
+          chmod +x setuptools-0.6c11-py2.7.egg
+          ./setuptools-0.6c11-py2.7.egg
+          yum update -y
+          yum install -y rpm-build
+      - name: Set Up JDK 8
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '8'
+          cache: maven
+          architecture: x64
+      - name: Build Project
+        run: |
+          curl -L "https://dlcdn.apache.org/maven/maven-3/${MVN_VERSION}/binaries/apache-maven-${MVN_VERSION}-bin.tar.gz" | tar zx
+          VERSION=$("apache-maven-${MVN_VERSION}/bin/mvn" org.apache.maven.plugins:maven-help-plugin:3.2.0:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          "apache-maven-${MVN_VERSION}/bin/mvn" versions:set -DnewVersion="${VERSION}"
+          "apache-maven-${MVN_VERSION}/bin/mvn" -B clean install rpm:rpm -DnewVersion="${VERSION}" -DbuildNumber=388e072381e71c7755673b7743531c03a4d61be8 -DskipTests -Dpython.ver="python >= 2.6"
+          cd ambari-server/target/rpm/ambari-server/RPMS/noarch/
+          tar -zcf "ambari-server-${VERSION}.tar.gz" ambari-server*.rpm
+      - name: Create release
+        if: github.ref_type == 'tag'
+        uses: ncipollo/release-action@v1.11.1
+        with:
+          name: ambari-${{ env.VERSION }}
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: ambari-server/target/rpm/ambari-server/RPMS/noarch/ambari-server-${{ env.VERSION }}.tar.gz
